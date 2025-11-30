@@ -101,7 +101,7 @@ def generate_comparison_grid(
         # from_image_padded rotations
         for col, steps in enumerate(rotation_steps):
             x = padding + (1 + col) * (cell_size + padding)
-            grid[y_pad:y_pad+cell_size, x:x+cell_size] = polar_padded.rotate(steps).to_image(cell_size)
+            grid[y_pad:y_pad+cell_size, x:x+cell_size] = polar_padded.rotate(steps).mask(steps).to_image(cell_size)
 
     Path(output_path).parent.mkdir(exist_ok=True)
     io.imsave(output_path, grid)
@@ -167,7 +167,7 @@ def test_comparison_grid(
         # from_image_padded rotations
         for col, steps in enumerate(rotation_steps):
             x = padding + (1 + col) * (cell_size + padding)
-            grid[y_pad:y_pad+cell_size, x:x+cell_size] = polar_padded.rotate(steps).to_image(cell_size)
+            grid[y_pad:y_pad+cell_size, x:x+cell_size] = polar_padded.rotate(steps).mask(steps).to_image(cell_size)
 
     Path(output_path).parent.mkdir(exist_ok=True)
     io.imsave(output_path, grid)

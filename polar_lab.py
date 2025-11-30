@@ -160,6 +160,7 @@ class PolarLAB:
 
         nonempty = counts > 0
         bins_flat[nonempty] /= counts[nonempty, np.newaxis]
+        bins_flat[~nonempty, 0] = 100.0 #white bg
         bins = bins_flat.reshape(rings, sectors, 3)
 
         return cls(bins.astype(np.float32), rings, sectors, original_size=size)
@@ -195,7 +196,7 @@ class PolarLAB:
         validity = np.roll(base_mask, -rotation_steps, axis=1)
 
         result = self.data.copy()
-        result[~validity] = fill_value
+        result[~validity, 0] = fill_value
         return PolarLAB(result, self.rings, self.sectors, self.original_size)
 
     def rotate(self, steps: int) -> "PolarLAB":
