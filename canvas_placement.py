@@ -1,11 +1,20 @@
 import numpy as np
-from PIL import Image
-from skimage import color
+from skimage import io, color, transform
 
 
-def find_max_diff_region(img1: Image.Image, img2: Image.Image, brush_size: int) -> tuple[int, int]:
-    arr1 = np.asarray(img1.convert("RGB")).astype(np.float64) / 255.0
-    arr2 = np.asarray(img2.convert("RGB")).astype(np.float64) / 255.0
+def find_max_diff_region(img1: np.ndarray, img2: np.ndarray, brush_size: int) -> tuple[int, int, np.ndarray]:
+    """Find region with maximum perceptual difference between two images.
+
+    Args:
+        img1: RGB image array (H, W, 3), uint8 or float
+        img2: RGB image array (H, W, 3), uint8 or float
+        brush_size: Size of brush for window calculation
+
+    Returns:
+        (center_x, center_y, diff_map)
+    """
+    arr1 = _to_rgb_float(img1)
+    arr2 = _to_rgb_float(img2)
 
     lab1 = color.rgb2lab(arr1)
     lab2 = color.rgb2lab(arr2)
@@ -13,8 +22,7 @@ def find_max_diff_region(img1: Image.Image, img2: Image.Image, brush_size: int) 
     diff = np.sqrt(np.sum((lab1 - lab2) ** 2, axis=2))
 
     window_size = int(round(1.27 * brush_size))
-    pad = (window_size // 2) - 1
-    pad = max(pad, 0)
+    pad = max((window_size // 2) - 1, 0)
 
     diff_padded = np.pad(diff, pad, mode="constant", constant_values=0)
 
@@ -22,7 +30,6 @@ def find_max_diff_region(img1: Image.Image, img2: Image.Image, brush_size: int) 
     integral[1:, 1:] = np.cumsum(np.cumsum(diff_padded, axis=0), axis=1)
 
     h, w = diff_padded.shape
-
     ws = window_size
     y_max = h - ws + 1
     x_max = w - ws + 1
@@ -42,30 +49,35 @@ def find_max_diff_region(img1: Image.Image, img2: Image.Image, brush_size: int) 
     center_y = center_padded_y - pad
     center_x = center_padded_x - pad
 
-    # diff is output for testing
     return (center_x, center_y, diff)
 
 
-def get_placement_section(img: Image.Image, x: int, y: int, region_size: int) -> np.ndarray:
-    arr = np.asarray(img.convert("RGB"))
+def get_placement_section(img: np.ndarray, x: int, y: int, region_size: int) -> np.ndarray:
+    """Extract a square section centered at (x, y) from image.
+
+    Args:
+        img: RGB image array (H, W, 3)
+        x: Center x coordinate
+        y: Center y coordinate
+        region_size: Size of square region to extract
+
+    Returns:
+        Square RGB array of shape (region_size, region_size, 3)
+    """
+    arr = _to_rgb_uint8(img)
     h, w = arr.shape[:2]
 
     half = region_size // 2
+    result = np.zeros((region_size, region_size, 3), dtype=np.uint8)
 
-    # Output array initialized to 0
-    result = np.zeros((region_size, region_size, 3), dtype=arr.dtype)
-
-    # Source coordinates in original image
     src_y_start = y - half
     src_y_end = src_y_start + region_size
     src_x_start = x - half
     src_x_end = src_x_start + region_size
 
-    # Destination coordinates in result array
     dst_y_start = 0
     dst_x_start = 0
 
-    # Clip to image bounds and adjust destination accordingly
     if src_y_start < 0:
         dst_y_start = -src_y_start
         src_y_start = 0
@@ -77,7 +89,6 @@ def get_placement_section(img: Image.Image, x: int, y: int, region_size: int) ->
     if src_x_end > w:
         src_x_end = w
 
-    # Compute how much we're actually copying
     copy_h = src_y_end - src_y_start
     copy_w = src_x_end - src_x_start
 
@@ -87,3 +98,26 @@ def get_placement_section(img: Image.Image, x: int, y: int, region_size: int) ->
 
     return result
 
+
+def _to_rgb_float(img: np.ndarray) -> np.ndarray:
+    """Convert image to RGB float64 in [0, 1]."""
+    if img.ndim == 2:
+        img = color.gray2rgb(img)
+    elif img.shape[2] == 4:
+        img = color.rgba2rgb(img)
+
+    if img.dtype == np.uint8:
+        return img.astype(np.float64) / 255.0
+    return img.astype(np.float64)
+
+
+def _to_rgb_uint8(img: np.ndarray) -> np.ndarray:
+    """Convert image to RGB uint8."""
+    if img.ndim == 2:
+        img = color.gray2rgb(img)
+    elif img.shape[2] == 4:
+        img = color.rgba2rgb(img)
+
+    if img.dtype != np.uint8:
+        img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
+    return img

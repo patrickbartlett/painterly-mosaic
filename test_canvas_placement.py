@@ -3,17 +3,16 @@
 import os
 import numpy as np
 from pathlib import Path
-from PIL import Image
-from canvas_placement import *
+from skimage import io, transform
+from canvas_placement import find_max_diff_region, get_placement_section
 
 
-def test_directory(input_dir: str = 'testicons', output_path: str = 'testplacement/testicons.png', brush_size: int = 10, cell_size: int = 64):
+def test_directory(input_dir: str = 'testicons', output_path: str = 'testplacement/testicons.png',
+                   brush_size: int = 10, cell_size: int = 64):
     """Test all images in input_dir against black, save results as grid."""
     Path(output_path).parent.mkdir(exist_ok=True)
 
     valid_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
-
-    # Collect valid image files
     image_files = sorted([
         f for f in os.listdir(input_dir)
         if os.path.splitext(f)[1].lower() in valid_extensions
@@ -23,60 +22,41 @@ def test_directory(input_dir: str = 'testicons', output_path: str = 'testplaceme
         print(f"No images found in {input_dir}")
         return
 
-    # Grid layout: 3 columns (black, original, diff), N rows
     n_cols = 3
     n_rows = len(image_files)
     padding = 4
 
     grid_w = n_cols * cell_size + (n_cols + 1) * padding
     grid_h = n_rows * cell_size + (n_rows + 1) * padding
-    grid = Image.new("RGB", (grid_w, grid_h), (255, 255, 255))
+    grid = np.full((grid_h, grid_w, 3), 255, dtype=np.uint8)
 
     for row, filename in enumerate(image_files):
         filepath = os.path.join(input_dir, filename)
-        img = Image.open(filepath).convert("RGB")
-        w, h = img.size
+        img = _load_rgb(filepath)
+        h, w = img.shape[:2]
 
-        # Create black image of same size
-        black = Image.new("RGB", (w, h), (0, 0, 0))
-
+        black = np.zeros((h, w, 3), dtype=np.uint8)
         cx, cy, diff = find_max_diff_region(img, black, brush_size)
 
-        # Convert diff to grayscale RGB
-        diff_gray = diff_to_grayscale(diff).convert("RGB")
-        diff_arr = np.array(diff_gray)
+        diff_marked = _diff_to_marked_rgb(diff, cx, cy, w, h)
 
-        # Draw red marker at center point (3x3 for visibility)
-        for dy in range(-1, 2):
-            for dx in range(-1, 2):
-                px = np.clip(cx + dx, 0, w - 1)
-                py = np.clip(cy + dy, 0, h - 1)
-                diff_arr[py, px] = [255, 0, 0]
-        diff_marked = Image.fromarray(diff_arr)
-
-        # Resize all to cell_size
-        black_resized = black.resize((cell_size, cell_size), Image.NEAREST)
-        img_resized = img.resize((cell_size, cell_size), Image.NEAREST)
-        diff_resized = diff_marked.resize((cell_size, cell_size), Image.NEAREST)
-
-        # Place in grid
         y = padding + row * (cell_size + padding)
-        grid.paste(black_resized, (padding, y))
-        grid.paste(img_resized, (padding + cell_size + padding, y))
-        grid.paste(diff_resized, (padding + 2 * (cell_size + padding), y))
+        _paste_resized(grid, black, padding, y, cell_size)
+        _paste_resized(grid, img, padding + cell_size + padding, y, cell_size)
+        _paste_resized(grid, diff_marked, padding + 2 * (cell_size + padding), y, cell_size)
 
         print(f"{filename}: center=({cx}, {cy})")
 
-    grid.save(output_path)
+    io.imsave(output_path, grid)
     print(f"\nSaved grid with {len(image_files)} images to {output_path}")
 
 
-def test_directory_2(input_dir: str = 'testicons', output_path: str = 'testplacement/testicons2.png', brush_size: int = 10, cell_size: int = 64):
+def test_directory_2(input_dir: str = 'testicons', output_path: str = 'testplacement/testicons2.png',
+                     brush_size: int = 10, cell_size: int = 64):
     """Test consecutive image pairs, save results as grid."""
     Path(output_path).parent.mkdir(exist_ok=True)
 
     valid_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
-
     image_files = sorted([
         f for f in os.listdir(input_dir)
         if os.path.splitext(f)[1].lower() in valid_extensions
@@ -86,90 +66,67 @@ def test_directory_2(input_dir: str = 'testicons', output_path: str = 'testplace
         print(f"Need at least 2 images in {input_dir}")
         return
 
-    # Grid layout: 3 columns (img1, img2, diff), N-1 rows
     n_cols = 3
     n_rows = len(image_files) - 1
     padding = 4
 
     grid_w = n_cols * cell_size + (n_cols + 1) * padding
     grid_h = n_rows * cell_size + (n_rows + 1) * padding
-    grid = Image.new("RGB", (grid_w, grid_h), (255, 255, 255))
+    grid = np.full((grid_h, grid_w, 3), 255, dtype=np.uint8)
 
     for row in range(n_rows):
         filepath1 = os.path.join(input_dir, image_files[row])
         filepath2 = os.path.join(input_dir, image_files[row + 1])
 
-        img1 = Image.open(filepath1).convert("RGB")
-        img2 = Image.open(filepath2).convert("RGB")
+        img1 = _load_rgb(filepath1)
+        img2 = _load_rgb(filepath2)
 
-        # Resize img2 to match img1 if needed
-        if img1.size != img2.size:
-            img2 = img2.resize(img1.size, Image.NEAREST)
+        if img1.shape[:2] != img2.shape[:2]:
+            img2 = _resize_uint8(img2, (img1.shape[0], img1.shape[1]))
 
-        w, h = img1.size
+        h, w = img1.shape[:2]
         cx, cy, diff = find_max_diff_region(img1, img2, brush_size)
 
-        # Convert diff to grayscale RGB
-        diff_gray = diff_to_grayscale(diff).convert("RGB")
-        diff_arr = np.array(diff_gray)
+        diff_marked = _diff_to_marked_rgb(diff, cx, cy, w, h)
 
-        # Draw red marker at center point (3x3 for visibility)
-        for dy in range(-1, 2):
-            for dx in range(-1, 2):
-                px = np.clip(cx + dx, 0, w - 1)
-                py = np.clip(cy + dy, 0, h - 1)
-                diff_arr[py, px] = [255, 0, 0]
-        diff_marked = Image.fromarray(diff_arr)
-
-        # Resize all to cell_size
-        img1_resized = img1.resize((cell_size, cell_size), Image.NEAREST)
-        img2_resized = img2.resize((cell_size, cell_size), Image.NEAREST)
-        diff_resized = diff_marked.resize((cell_size, cell_size), Image.NEAREST)
-
-        # Place in grid
         y = padding + row * (cell_size + padding)
-        grid.paste(img1_resized, (padding, y))
-        grid.paste(img2_resized, (padding + cell_size + padding, y))
-        grid.paste(diff_resized, (padding + 2 * (cell_size + padding), y))
+        _paste_resized(grid, img1, padding, y, cell_size)
+        _paste_resized(grid, img2, padding + cell_size + padding, y, cell_size)
+        _paste_resized(grid, diff_marked, padding + 2 * (cell_size + padding), y, cell_size)
 
         print(f"{image_files[row]} vs {image_files[row + 1]}: center=({cx}, {cy})")
 
-    grid.save(output_path)
+    io.imsave(output_path, grid)
     print(f"\nSaved grid with {n_rows} comparisons to {output_path}")
 
 
-def make_test_pair(case: int) -> tuple[Image.Image, Image.Image, str]:
+def make_test_pair(case: int) -> tuple[np.ndarray, np.ndarray, str]:
     """Generate a pair of 64x64 test images with known difference region."""
     size = 64
     base = np.full((size, size, 3), 128, dtype=np.uint8)
     modified = base.copy()
 
     if case == 0:
-        # Bright patch in center
         modified[28:36, 28:36] = [255, 0, 0]
         desc = "center red patch"
     elif case == 1:
-        # Gradient difference on right side
         for x in range(48, 64):
             modified[:, x] = [100 + (x - 48) * 10, 128, 128]
         desc = "right gradient"
     elif case == 2:
-        # Corner difference (top-left)
         modified[0:8, 0:8] = [0, 255, 0]
         desc = "top-left corner green patch"
     elif case == 3:
-        # Diagonal stripe
         for i in range(size):
             if 20 <= i < 30:
                 modified[i, i] = [255, 255, 0]
                 modified[i, min(i + 1, 63)] = [255, 255, 0]
         desc = "diagonal stripe"
     else:
-        # Edge difference (bottom edge)
         modified[58:64, 20:44] = [0, 0, 255]
         desc = "bottom edge blue patch"
 
-    return Image.fromarray(base), Image.fromarray(modified), desc
+    return base, modified, desc
 
 
 def test_generated(output_path: str = 'testplacement/testgenerated.png', brush_size: int = 3, cell_size: int = 64):
@@ -183,62 +140,75 @@ def test_generated(output_path: str = 'testplacement/testgenerated.png', brush_s
 
     grid_w = n_cols * cell_size + (n_cols + 1) * padding
     grid_h = n_rows * cell_size + (n_rows + 1) * padding
-    grid = Image.new("RGB", (grid_w, grid_h), (255, 255, 255))
+    grid = np.full((grid_h, grid_w, 3), 255, dtype=np.uint8)
 
     for row in range(num_cases):
         base, modified, desc = make_test_pair(row)
-        w, h = base.size
+        h, w = base.shape[:2]
 
         cx, cy, diff = find_max_diff_region(base, modified, brush_size)
 
-        # Convert diff to grayscale RGB
-        diff_gray = diff_to_grayscale(diff).convert("RGB")
-        diff_arr = np.array(diff_gray)
+        diff_marked = _diff_to_marked_rgb(diff, cx, cy, w, h)
 
-        # Draw red marker at center point (3x3 for visibility)
-        for dy in range(-1, 2):
-            for dx in range(-1, 2):
-                px = np.clip(cx + dx, 0, w - 1)
-                py = np.clip(cy + dy, 0, h - 1)
-                diff_arr[py, px] = [255, 0, 0]
-        diff_marked = Image.fromarray(diff_arr)
-
-        # Resize all to cell_size
-        base_resized = base.resize((cell_size, cell_size), Image.NEAREST)
-        modified_resized = modified.resize((cell_size, cell_size), Image.NEAREST)
-        diff_resized = diff_marked.resize((cell_size, cell_size), Image.NEAREST)
-
-        # Place in grid
         y = padding + row * (cell_size + padding)
-        grid.paste(base_resized, (padding, y))
-        grid.paste(modified_resized, (padding + cell_size + padding, y))
-        grid.paste(diff_resized, (padding + 2 * (cell_size + padding), y))
+        _paste_resized(grid, base, padding, y, cell_size)
+        _paste_resized(grid, modified, padding + cell_size + padding, y, cell_size)
+        _paste_resized(grid, diff_marked, padding + 2 * (cell_size + padding), y, cell_size)
 
         print(f"Case {row} ({desc}): center=({cx}, {cy})")
 
-    grid.save(output_path)
+    io.imsave(output_path, grid)
     print(f"\nSaved grid with {num_cases} test cases to {output_path}")
 
 
 def test_get_placement_section(output_path: str = "testplacement/section.png"):
     Path(output_path).parent.mkdir(exist_ok=True)
 
-    img = Image.open("assets/WoWlogo.png")
-    arr = np.asarray(img.convert("RGB"))
+    img = _load_rgb("assets/WoWlogo.png")
+    h, w = img.shape[:2]
 
     region_size = int(64 * 1.27)
-    h, w = arr.shape[:2]
     x, y = w // 2, h // 2
 
     section = get_placement_section(img, x, y, region_size)
+    io.imsave(output_path, section)
 
-    Image.fromarray(section).save(output_path)
+
+def _load_rgb(path: str) -> np.ndarray:
+    """Load image as RGB uint8."""
+    img = io.imread(path)
+    if img.ndim == 2:
+        img = np.stack([img] * 3, axis=-1)
+    elif img.shape[2] == 4:
+        img = img[:, :, :3]
+    return img.astype(np.uint8)
 
 
-def diff_to_grayscale(diff: np.ndarray) -> Image.Image:
-    """Convert diff map to grayscale image, normalized."""
+def _resize_uint8(img: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """Resize image to (height, width) using nearest neighbor."""
+    resized = transform.resize(img, shape, order=0, preserve_range=True, anti_aliasing=False)
+    return resized.astype(np.uint8)
+
+
+def _paste_resized(grid: np.ndarray, img: np.ndarray, x: int, y: int, cell_size: int):
+    """Resize img to cell_size and paste into grid at (x, y)."""
+    resized = _resize_uint8(img, (cell_size, cell_size))
+    grid[y:y + cell_size, x:x + cell_size] = resized
+
+
+def _diff_to_marked_rgb(diff: np.ndarray, cx: int, cy: int, w: int, h: int) -> np.ndarray:
+    """Convert diff map to grayscale RGB with red marker at center."""
     normalized = (diff - diff.min()) / (diff.max() - diff.min() + 1e-8) * 255
-    return Image.fromarray(normalized.astype(np.uint8), mode="L")
+    gray = normalized.astype(np.uint8)
+    rgb = np.stack([gray, gray, gray], axis=-1)
+
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            px = np.clip(cx + dx, 0, w - 1)
+            py = np.clip(cy + dy, 0, h - 1)
+            rgb[py, px] = [255, 0, 0]
+
+    return rgb
 
 
 def main():
@@ -246,7 +216,6 @@ def main():
     test_directory_2()
     test_generated()
     test_get_placement_section()
-
 
 
 if __name__ == "__main__":
