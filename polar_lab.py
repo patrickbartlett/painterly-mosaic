@@ -194,8 +194,7 @@ class PolarLAB:
         base_mask = self._get_base_mask(self.original_size, self.rings, self.sectors)
         validity = np.roll(base_mask, -rotation_steps, axis=1)
 
-        rotated_data = np.roll(self.data, -rotation_steps, axis=1)
-        result = rotated_data.copy()
+        result = self.data.copy()
         result[~validity] = fill_value
         return PolarLAB(result, self.rings, self.sectors, self.original_size)
 
