@@ -11,7 +11,7 @@ class PolarLAB:
         self.sectors = sectors
 
     @classmethod
-    def from_image(cls, image: np.ndarray, rings: int = 4, sectors: int = 24) -> "PolarLAB":
+    def from_image(cls, image: np.ndarray, rings: int = 10, sectors: int = 72) -> "PolarLAB":
         """Create PolarLAB from an RGB image (H, W, 3)."""
         # Normalize to 0-1
         if image.max() > 1.0:
