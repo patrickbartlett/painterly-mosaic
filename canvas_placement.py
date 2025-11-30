@@ -44,3 +44,46 @@ def find_max_diff_region(img1: Image.Image, img2: Image.Image, brush_size: int) 
 
     # diff is output for testing
     return (center_x, center_y, diff)
+
+
+def get_placement_section(img: Image.Image, x: int, y: int, region_size: int) -> np.ndarray:
+    arr = np.asarray(img.convert("RGB"))
+    h, w = arr.shape[:2]
+
+    half = region_size // 2
+
+    # Output array initialized to 0
+    result = np.zeros((region_size, region_size, 3), dtype=arr.dtype)
+
+    # Source coordinates in original image
+    src_y_start = y - half
+    src_y_end = src_y_start + region_size
+    src_x_start = x - half
+    src_x_end = src_x_start + region_size
+
+    # Destination coordinates in result array
+    dst_y_start = 0
+    dst_x_start = 0
+
+    # Clip to image bounds and adjust destination accordingly
+    if src_y_start < 0:
+        dst_y_start = -src_y_start
+        src_y_start = 0
+    if src_x_start < 0:
+        dst_x_start = -src_x_start
+        src_x_start = 0
+    if src_y_end > h:
+        src_y_end = h
+    if src_x_end > w:
+        src_x_end = w
+
+    # Compute how much we're actually copying
+    copy_h = src_y_end - src_y_start
+    copy_w = src_x_end - src_x_start
+
+    if copy_h > 0 and copy_w > 0:
+        result[dst_y_start:dst_y_start + copy_h, dst_x_start:dst_x_start + copy_w] = \
+            arr[src_y_start:src_y_end, src_x_start:src_x_end]
+
+    return result
+

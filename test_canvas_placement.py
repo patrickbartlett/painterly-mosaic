@@ -4,7 +4,7 @@ import os
 import numpy as np
 from pathlib import Path
 from PIL import Image
-from canvas_placement import find_max_diff_region
+from canvas_placement import *
 
 
 def test_directory(input_dir: str = 'testicons', output_path: str = 'testplacement/testicons.png', brush_size: int = 10, cell_size: int = 64):
@@ -219,6 +219,22 @@ def test_generated(output_path: str = 'testplacement/testgenerated.png', brush_s
     grid.save(output_path)
     print(f"\nSaved grid with {num_cases} test cases to {output_path}")
 
+
+def test_get_placement_section(output_path: str = "testplacement/section.png"):
+    Path(output_path).parent.mkdir(exist_ok=True)
+
+    img = Image.open("assets/WoWlogo.png")
+    arr = np.asarray(img.convert("RGB"))
+
+    region_size = int(64 * 1.27)
+    h, w = arr.shape[:2]
+    x, y = w // 2, h // 2
+
+    section = get_placement_section(img, x, y, region_size)
+
+    Image.fromarray(section).save(output_path)
+
+
 def diff_to_grayscale(diff: np.ndarray) -> Image.Image:
     """Convert diff map to grayscale image, normalized."""
     normalized = (diff - diff.min()) / (diff.max() - diff.min() + 1e-8) * 255
@@ -229,6 +245,7 @@ def main():
     test_directory()
     test_directory_2()
     test_generated()
+    test_get_placement_section()
 
 
 
