@@ -6,31 +6,9 @@ Generates test images, converts to PolarLAB, rotates, and outputs comparison gri
 
 import numpy as np
 from pathlib import Path
-from skimage import color, io
+from skimage import io
 from skimage.transform import resize
 from polar_lab import PolarLAB
-
-
-def polar_to_image(polar: PolarLAB, size: int = 128) -> np.ndarray:
-    """Reconstruct an image from PolarLAB representation."""
-    center = size / 2
-    y, x = np.mgrid[0:size, 0:size]
-    dx, dy = x - center, y - center
-
-    distance = np.sqrt(dx**2 + dy**2)
-    angle = np.mod(np.arctan2(dy, dx), 2 * np.pi)
-
-    ring_bounds = np.array([
-        center * np.sqrt((i + 1) / polar.rings)
-        for i in range(polar.rings)
-    ])
-
-    ring_idx = np.clip(np.searchsorted(ring_bounds, distance, side='left'), 0, polar.rings - 1)
-    sector_idx = np.clip((angle / (2 * np.pi) * polar.sectors).astype(int), 0, polar.sectors - 1)
-
-    lab_img = polar.data[ring_idx, sector_idx]
-    rgb = color.lab2rgb(lab_img)
-    return (rgb * 255).clip(0, 255).astype(np.uint8)
 
 
 # Test image generators
@@ -114,7 +92,7 @@ def generate_comparison_grid(
         # Rotations
         for col, steps in enumerate(rotation_steps):
             x = padding + (1 + col) * (cell_size + padding)
-            grid[y:y+cell_size, x:x+cell_size] = polar_to_image(polar.rotate(steps), cell_size)
+            grid[y:y+cell_size, x:x+cell_size] = polar.rotate(steps).to_image(cell_size)
 
     Path(output_path).parent.mkdir(exist_ok=True)
     io.imsave(output_path, grid)
@@ -174,7 +152,7 @@ def test_comparison_grid(
         # Rotations
         for col, steps in enumerate(rotation_steps):
             x = padding + (1 + col) * (cell_size + padding)
-            grid[y:y+cell_size, x:x+cell_size] = polar_to_image(polar.rotate(steps), cell_size)
+            grid[y:y+cell_size, x:x+cell_size] = polar.rotate(steps).to_image(cell_size)
 
     Path(output_path).parent.mkdir(exist_ok=True)
     io.imsave(output_path, grid)

@@ -62,6 +62,27 @@ class PolarLAB:
 
         return cls(bins.astype(np.float32), rings, sectors)
 
+    def to_image(self, size: int = 128) -> np.ndarray:
+        """Reconstruct an RGB image from PolarLAB representation.
+
+        Returns uint8 array of shape (size, size, 3).
+        """
+        center = size / 2
+        y, x = np.mgrid[0:size, 0:size]
+        dx, dy = x - center, y - center
+
+        distance = np.sqrt(dx**2 + dy**2)
+        angle = np.mod(np.arctan2(dy, dx), 2 * np.pi)
+
+        ring_bounds = center * np.sqrt(np.arange(1, self.rings + 1) / self.rings)
+
+        ring_idx = np.clip(np.searchsorted(ring_bounds, distance, side='left'), 0, self.rings - 1)
+        sector_idx = np.clip((angle / (2 * np.pi) * self.sectors).astype(int), 0, self.sectors - 1)
+
+        lab_img = self.data[ring_idx, sector_idx]
+        rgb = color.lab2rgb(lab_img)
+        return (rgb * 255).clip(0, 255).astype(np.uint8)
+
     def rotate(self, steps: int) -> "PolarLAB":
         """Return rotated copy. O(1) via index shift."""
         return PolarLAB(np.roll(self.data, -steps, axis=1), self.rings, self.sectors)
