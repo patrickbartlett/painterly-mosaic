@@ -2,13 +2,66 @@ import numpy as np
 from skimage import color
 
 
+def polar_geometry(size, rings=10, sectors=72):
+    """Compute geometry for circumscribed polar grid."""
+    diag = int(np.ceil(size * np.sqrt(2)))
+    r_max = diag / 2
+    ring_bounds = r_max * np.sqrt(np.arange(1, rings + 1) / rings)
+    return diag, r_max, ring_bounds
+
+
+def get_mask_for_rotation(size, rings=10, sectors=72):
+    """
+    Returns boolean mask (rings, sectors) indicating which bins
+    contain real pixels for a size×size source rotated by rotation_steps.
+    """
+    diag, r_max, ring_bounds = polar_geometry(size, rings, sectors)
+    pad = (diag - size) // 2
+
+    center = diag / 2
+    y, x = np.mgrid[0:diag, 0:diag]
+    distance = np.sqrt((x - center)**2 + (y - center)**2)
+    angle = np.mod(np.arctan2(y - center, x - center), 2 * np.pi)
+
+    ring_idx = np.clip(np.searchsorted(ring_bounds, distance, side='left'), 0, rings - 1)
+    sector_idx = np.clip((angle / (2 * np.pi) * sectors).astype(int), 0, sectors - 1)
+
+    # Valid pixels: inside original square
+    valid_pixels = np.zeros((diag, diag), dtype=bool)
+    valid_pixels[pad:pad+size, pad:pad+size] = True
+
+    flat_idx = (ring_idx * sectors + sector_idx).ravel()
+    valid_counts = np.zeros(rings * sectors, dtype=np.int32)
+    np.add.at(valid_counts, flat_idx, valid_pixels.ravel().astype(np.int32))
+
+    mask = (valid_counts > 0).reshape(rings, sectors)
+    return mask
+
 class PolarLAB:
     """Polar grid representation of an image in CIELAB color space."""
 
-    def __init__(self, data: np.ndarray, rings: int, sectors: int):
+    _base_masks = {}  # Cache per (size, rings, sectors)
+
+    def __init__(self, data: np.ndarray, rings: int, sectors: int, original_size: int = None):
         self.data = data
         self.rings = rings
         self.sectors = sectors
+        self.original_size = original_size
+
+    @classmethod
+    def _get_base_mask(cls, size, rings, sectors):
+        key = (size, rings, sectors)
+        if key not in cls._base_masks:
+            cls._base_masks[key] = get_mask_for_rotation(size, rings, sectors)
+        return cls._base_masks[key]
+
+    @classmethod
+    def from_mask(cls, mask: np.ndarray, original_size: int = None) -> "PolarLAB":
+        """Create PolarLAB from boolean mask (rings, sectors). True=white, False=black."""
+        rings, sectors = mask.shape
+        data = np.zeros((rings, sectors, 3), dtype=np.float32)
+        data[mask, 0] = 100.0  # L=100 for white, L=0 for black; a=b=0
+        return cls(data, rings, sectors, original_size)
 
     @classmethod
     def from_image(cls, image: np.ndarray, rings: int = 10, sectors: int = 72) -> "PolarLAB":
@@ -60,7 +113,57 @@ class PolarLAB:
             if neighbors:
                 bins[r, s] = np.mean(neighbors, axis=0)
 
-        return cls(bins.astype(np.float32), rings, sectors)
+        return cls(bins.astype(np.float32), rings, sectors, h)
+
+
+    @classmethod
+    def from_image_padded(cls, image: np.ndarray, rings: int = 10, sectors: int = 72) -> "PolarLAB":
+        """Create PolarLAB from an RGB image with circumscribed padding."""
+        if image.max() > 1.0:
+            image = image.astype(np.float32) / 255.0
+
+        h, w = image.shape[:2]
+        assert h == w, "Image must be square"
+        size = h
+
+        diag, r_max, ring_bounds = polar_geometry(size, rings, sectors)
+        pad = (diag - size) // 2
+
+        # Pad and convert
+        padded = np.zeros((diag, diag, 3), dtype=np.float32)
+        padded[pad:pad+size, pad:pad+size] = image
+        lab = color.rgb2lab(padded)
+
+        # Validity mask
+        valid_pixels = np.zeros((diag, diag), dtype=bool)
+        valid_pixels[pad:pad+size, pad:pad+size] = True
+
+        # Coordinates
+        center = diag / 2
+        y, x = np.mgrid[0:diag, 0:diag]
+        distance = np.sqrt((x - center)**2 + (y - center)**2)
+        angle = np.mod(np.arctan2(y - center, x - center), 2 * np.pi)
+
+        ring_idx = np.clip(np.searchsorted(ring_bounds, distance, side='left'), 0, rings - 1)
+        sector_idx = np.clip((angle / (2 * np.pi) * sectors).astype(int), 0, sectors - 1)
+
+        flat_idx = (ring_idx * sectors + sector_idx).ravel()
+        flat_lab = lab.reshape(-1, 3)
+        flat_valid = valid_pixels.ravel()
+
+        # Accumulate only valid pixels
+        bins_flat = np.zeros((rings * sectors, 3), dtype=np.float64)
+        counts = np.zeros(rings * sectors, dtype=np.int32)
+
+        np.add.at(bins_flat, flat_idx[flat_valid], flat_lab[flat_valid])
+        np.add.at(counts, flat_idx[flat_valid], 1)
+
+        nonempty = counts > 0
+        bins_flat[nonempty] /= counts[nonempty, np.newaxis]
+        bins = bins_flat.reshape(rings, sectors, 3)
+
+        return cls(bins.astype(np.float32), rings, sectors, original_size=size)
+
 
     def to_image(self, size: int = 128) -> np.ndarray:
         """Reconstruct an RGB image from PolarLAB representation.
@@ -83,9 +186,22 @@ class PolarLAB:
         rgb = color.lab2rgb(lab_img)
         return (rgb * 255).clip(0, 255).astype(np.uint8)
 
+
+    def mask(self, rotation_steps: int, fill_value: float = 0.0) -> "PolarLAB":
+        if self.original_size is None:
+            raise ValueError("original_size required for masking")
+
+        base_mask = self._get_base_mask(self.original_size, self.rings, self.sectors)
+        validity = np.roll(base_mask, -rotation_steps, axis=1)
+
+        rotated_data = np.roll(self.data, -rotation_steps, axis=1)
+        result = rotated_data.copy()
+        result[~validity] = fill_value
+        return PolarLAB(result, self.rings, self.sectors, self.original_size)
+
     def rotate(self, steps: int) -> "PolarLAB":
         """Return rotated copy. O(1) via index shift."""
-        return PolarLAB(np.roll(self.data, -steps, axis=1), self.rings, self.sectors)
+        return PolarLAB(np.roll(self.data, -steps, axis=1), self.rings, self.sectors, self.original_size)
 
     def flatten(self) -> np.ndarray:
         """Flatten to 1D vector for FAISS. Shape: (rings * sectors * 3,)"""

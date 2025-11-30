@@ -73,7 +73,7 @@ def generate_comparison_grid(
     rotation_steps = [i * sectors // num_rotations for i in range(num_rotations)]
 
     padding = 4
-    n_rows = len(GENERATORS)
+    n_rows = len(GENERATORS) * 2
     n_cols = 1 + num_rotations
 
     grid_h = n_rows * cell_size + (n_rows + 1) * padding
@@ -81,18 +81,27 @@ def generate_comparison_grid(
     grid = np.full((grid_h, grid_w, 3), 255, dtype=np.uint8)
 
     for row, (name, gen_func) in enumerate(GENERATORS):
-        y = padding + row * (cell_size + padding)
+        y_img = padding + (row * 2) * (cell_size + padding)
+        y_pad = padding + (row * 2 + 1) * (cell_size + padding)
+
         original = gen_func(64)
         polar = PolarLAB.from_image(original, rings=rings, sectors=sectors)
+        polar_padded = PolarLAB.from_image_padded(original, rings=rings, sectors=sectors)
 
         # Original (upscaled)
         original_big = np.repeat(np.repeat(original, 2, axis=0), 2, axis=1)
-        grid[y:y+cell_size, padding:padding+cell_size] = original_big
+        grid[y_img:y_img+cell_size, padding:padding+cell_size] = original_big
+        grid[y_pad:y_pad+cell_size, padding:padding+cell_size] = original_big
 
-        # Rotations
+        # from_image rotations
         for col, steps in enumerate(rotation_steps):
             x = padding + (1 + col) * (cell_size + padding)
-            grid[y:y+cell_size, x:x+cell_size] = polar.rotate(steps).to_image(cell_size)
+            grid[y_img:y_img+cell_size, x:x+cell_size] = polar.rotate(steps).to_image(cell_size)
+
+        # from_image_padded rotations
+        for col, steps in enumerate(rotation_steps):
+            x = padding + (1 + col) * (cell_size + padding)
+            grid[y_pad:y_pad+cell_size, x:x+cell_size] = polar_padded.rotate(steps).to_image(cell_size)
 
     Path(output_path).parent.mkdir(exist_ok=True)
     io.imsave(output_path, grid)
@@ -106,8 +115,6 @@ def test_comparison_grid(
     cell_size: int = 128,
     num_rotations: int = 5
 ):
-
-    # Find all image files in the input directory
     input_path = Path(input_dir)
     image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp', '.tga'}
     image_files = sorted([
@@ -122,7 +129,7 @@ def test_comparison_grid(
     rotation_steps = [i * sectors // num_rotations for i in range(num_rotations)]
 
     padding = 4
-    n_rows = len(image_files)
+    n_rows = len(image_files) * 2
     n_cols = 1 + num_rotations
 
     grid_h = n_rows * cell_size + (n_rows + 1) * padding
@@ -130,7 +137,8 @@ def test_comparison_grid(
     grid = np.full((grid_h, grid_w, 3), 255, dtype=np.uint8)
 
     for row, image_file in enumerate(image_files):
-        y = padding + row * (cell_size + padding)
+        y_img = padding + (row * 2) * (cell_size + padding)
+        y_pad = padding + (row * 2 + 1) * (cell_size + padding)
 
         # Load and prepare the image
         original = io.imread(image_file)
@@ -144,22 +152,57 @@ def test_comparison_grid(
             original = np.stack([original] * 3, axis=-1)
 
         polar = PolarLAB.from_image(original, rings=rings, sectors=sectors)
+        polar_padded = PolarLAB.from_image_padded(original, rings=rings, sectors=sectors)
 
         # Original (resized to cell_size)
         original_resized = (resize(original, (cell_size, cell_size), anti_aliasing=True) * 255).astype(np.uint8)
-        grid[y:y+cell_size, padding:padding+cell_size] = original_resized
+        grid[y_img:y_img+cell_size, padding:padding+cell_size] = original_resized
+        grid[y_pad:y_pad+cell_size, padding:padding+cell_size] = original_resized
 
-        # Rotations
+        # from_image rotations
         for col, steps in enumerate(rotation_steps):
             x = padding + (1 + col) * (cell_size + padding)
-            grid[y:y+cell_size, x:x+cell_size] = polar.rotate(steps).to_image(cell_size)
+            grid[y_img:y_img+cell_size, x:x+cell_size] = polar.rotate(steps).to_image(cell_size)
+
+        # from_image_padded rotations
+        for col, steps in enumerate(rotation_steps):
+            x = padding + (1 + col) * (cell_size + padding)
+            grid[y_pad:y_pad+cell_size, x:x+cell_size] = polar_padded.rotate(steps).to_image(cell_size)
 
     Path(output_path).parent.mkdir(exist_ok=True)
     io.imsave(output_path, grid)
     print(f"Saved: {output_path} ({len(image_files)} images)")
+
+def test_base_mask(
+    size: int = 64,
+    rings: int = 10,
+    sectors: int = 72,
+    output_path: str = "testmask/mask.png",
+    num_rotations: int = 5
+):
+    """Test _get_base_mask by visualizing it at multiple rotations."""
+    mask = PolarLAB._get_base_mask(size, rings, sectors)
+    polar = PolarLAB.from_mask(mask, original_size=size)
+
+    rotation_steps = [i * sectors // num_rotations for i in range(num_rotations)]
+    cell_size = 128
+    padding = 4
+
+    grid_w = num_rotations * cell_size + (num_rotations + 1) * padding
+    grid_h = cell_size + 2 * padding
+    grid = np.full((grid_h, grid_w, 3), 128, dtype=np.uint8)
+
+    for col, steps in enumerate(rotation_steps):
+        x = padding + col * (cell_size + padding)
+        grid[padding:padding+cell_size, x:x+cell_size] = polar.rotate(steps).to_image(cell_size)
+
+    Path(output_path).parent.mkdir(exist_ok=True)
+    io.imsave(output_path, grid)
+    print(f"Saved: {output_path} (mask shape: {mask.shape}, True count: {mask.sum()}/{mask.size})")
 
 
 if __name__ == "__main__":
 
     generate_comparison_grid()
     test_comparison_grid()
+    test_base_mask()
