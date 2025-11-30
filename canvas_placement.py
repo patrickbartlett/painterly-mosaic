@@ -3,16 +3,6 @@ from skimage import io, color, transform
 
 
 def find_max_diff_region(img1: np.ndarray, img2: np.ndarray, brush_size: int) -> tuple[int, int, np.ndarray]:
-    """Find region with maximum perceptual difference between two images.
-
-    Args:
-        img1: RGB image array (H, W, 3), uint8 or float
-        img2: RGB image array (H, W, 3), uint8 or float
-        brush_size: Size of brush for window calculation
-
-    Returns:
-        (center_x, center_y, diff_map)
-    """
     arr1 = _to_rgb_float(img1)
     arr2 = _to_rgb_float(img2)
 
@@ -53,17 +43,6 @@ def find_max_diff_region(img1: np.ndarray, img2: np.ndarray, brush_size: int) ->
 
 
 def get_placement_section(img: np.ndarray, x: int, y: int, region_size: int) -> np.ndarray:
-    """Extract a square section centered at (x, y) from image.
-
-    Args:
-        img: RGB image array (H, W, 3)
-        x: Center x coordinate
-        y: Center y coordinate
-        region_size: Size of square region to extract
-
-    Returns:
-        Square RGB array of shape (region_size, region_size, 3)
-    """
     arr = _to_rgb_uint8(img)
     h, w = arr.shape[:2]
 
@@ -100,7 +79,6 @@ def get_placement_section(img: np.ndarray, x: int, y: int, region_size: int) -> 
 
 
 def _to_rgb_float(img: np.ndarray) -> np.ndarray:
-    """Convert image to RGB float64 in [0, 1]."""
     if img.ndim == 2:
         img = color.gray2rgb(img)
     elif img.shape[2] == 4:
@@ -112,7 +90,6 @@ def _to_rgb_float(img: np.ndarray) -> np.ndarray:
 
 
 def _to_rgb_uint8(img: np.ndarray) -> np.ndarray:
-    """Convert image to RGB uint8."""
     if img.ndim == 2:
         img = color.gray2rgb(img)
     elif img.shape[2] == 4:
