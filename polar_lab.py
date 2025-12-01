@@ -160,10 +160,49 @@ class PolarLAB:
 
         nonempty = counts > 0
         bins_flat[nonempty] /= counts[nonempty, np.newaxis]
-        bins_flat[~nonempty, 0] = 100.0 #white bg
+        bins_flat[~nonempty] = 0.0 # black bg
         bins = bins_flat.reshape(rings, sectors, 3)
 
         return cls(bins.astype(np.float32), rings, sectors, original_size=size)
+
+    @classmethod
+    def from_query_section(cls, image: np.ndarray, brush_size: int,
+                        rings: int = 10, sectors: int = 72) -> "PolarLAB":
+        """Create PolarLAB from a query section, using brush_size for masking geometry."""
+        if image.max() > 1.0:
+            image = image.astype(np.float32) / 255.0
+
+        h, w = image.shape[:2]
+        lab = color.rgb2lab(image)
+
+        # Use the QUERY image dimensions for sampling
+        center_y, center_x = h / 2, w / 2
+
+        # But use BRUSH geometry for ring bounds (inscribed square)
+        diag, r_max, ring_bounds = polar_geometry(brush_size, rings, sectors)
+
+        y, x = np.mgrid[0:h, 0:w]
+        distance = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+        angle = np.mod(np.arctan2(y - center_y, x - center_x), 2 * np.pi)
+
+        ring_idx = np.clip(np.searchsorted(ring_bounds, distance, side='left'), 0, rings - 1)
+        sector_idx = np.clip((angle / (2 * np.pi) * sectors).astype(int), 0, sectors - 1)
+
+        flat_idx = (ring_idx * sectors + sector_idx).ravel()
+        flat_lab = lab.reshape(-1, 3)
+
+        bins_flat = np.zeros((rings * sectors, 3), dtype=np.float64)
+        counts = np.zeros(rings * sectors, dtype=np.int32)
+        np.add.at(bins_flat, flat_idx, flat_lab)
+        np.add.at(counts, flat_idx, 1)
+
+        nonempty = counts > 0
+        bins_flat[nonempty] /= counts[nonempty, np.newaxis]
+        bins_flat[~nonempty] = 0.0
+
+        bins = bins_flat.reshape(rings, sectors, 3)
+        # original_size = brush_size for mask computation
+        return cls(bins.astype(np.float32), rings, sectors, original_size=brush_size)
 
 
     def to_image(self, size: int = 128) -> np.ndarray:
@@ -196,7 +235,7 @@ class PolarLAB:
         validity = np.roll(base_mask, -rotation_steps, axis=1)
 
         result = self.data.copy()
-        result[~validity, 0] = fill_value
+        result[~validity] = fill_value
         return PolarLAB(result, self.rings, self.sectors, self.original_size)
 
     def rotate(self, steps: int) -> "PolarLAB":

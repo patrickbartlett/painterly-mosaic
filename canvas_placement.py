@@ -8,7 +8,7 @@ def find_max_diff_region(img1: np.ndarray, img2: np.ndarray, brush_size: int) ->
     img1_lab = cv2.cvtColor(img1[:, :, :3], cv2.COLOR_RGB2LAB) # ~200ms conversion bottleneck
     img2_lab = cv2.cvtColor(img2[:, :, :3], cv2.COLOR_RGB2LAB)
 
-    diff = np.sqrt(np.sum((img1_lab - img2_lab) ** 2, axis=2))
+    diff = np.sqrt(np.sum((img1_lab.astype(np.float32) - img2_lab.astype(np.float32)) ** 2, axis=2))
     diff_map = diff
 
 
