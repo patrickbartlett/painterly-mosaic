@@ -8,3 +8,5 @@ testoutput/
 testplacement/
 testpolar/
 testmask/
+testpaint/
+painterly.py

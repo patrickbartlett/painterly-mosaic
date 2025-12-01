@@ -1,81 +1,41 @@
 import numpy as np
 from skimage import io, color, transform
+import cv2
 
 
 def find_max_diff_region(img1: np.ndarray, img2: np.ndarray, brush_size: int) -> tuple[int, int, np.ndarray]:
-    arr1 = _to_rgb_float(img1)
-    arr2 = _to_rgb_float(img2)
 
-    lab1 = color.rgb2lab(arr1)
-    lab2 = color.rgb2lab(arr2)
+    img1_lab = cv2.cvtColor(img1[:, :, :3], cv2.COLOR_RGB2LAB) # ~200ms conversion bottleneck
+    img2_lab = cv2.cvtColor(img2[:, :, :3], cv2.COLOR_RGB2LAB)
 
-    diff = np.sqrt(np.sum((lab1 - lab2) ** 2, axis=2))
+    diff = np.sqrt(np.sum((img1_lab - img2_lab) ** 2, axis=2))
+    diff_map = diff
 
-    window_size = int(round(1.27 * brush_size))
-    pad = max((window_size // 2) - 1, 0)
 
-    diff_padded = np.pad(diff, pad, mode="constant", constant_values=0)
+    h, w = diff_map.shape
+    s = int(brush_size)
 
-    integral = np.zeros((diff_padded.shape[0] + 1, diff_padded.shape[1] + 1))
-    integral[1:, 1:] = np.cumsum(np.cumsum(diff_padded, axis=0), axis=1)
+    if s <= 0 or s > h or s > w:
+        return 0, 0, diff_map
 
-    h, w = diff_padded.shape
-    ws = window_size
-    y_max = h - ws + 1
-    x_max = w - ws + 1
+    integral = np.zeros((h + 1, w + 1), dtype=np.float64)
+    integral[1:, 1:] = np.cumsum(np.cumsum(diff_map, axis=0), axis=1)
 
-    sums = (
-        integral[ws:ws+y_max, ws:ws+x_max]
-        - integral[0:y_max, ws:ws+x_max]
-        - integral[ws:ws+y_max, 0:x_max]
-        + integral[0:y_max, 0:x_max]
-    )
+    region_sums = (integral[s:, s:]
+                 - integral[:-s, s:]
+                 - integral[s:, :-s]
+                 + integral[:-s, :-s])
 
-    best_idx = np.argmax(sums)
-    best_y, best_x = np.unravel_index(best_idx, sums.shape)
+    y, x = np.unravel_index(np.argmax(region_sums), region_sums.shape)
 
-    center_padded_y = best_y + ws // 2
-    center_padded_x = best_x + ws // 2
-    center_y = center_padded_y - pad
-    center_x = center_padded_x - pad
-
-    return (center_x, center_y, diff)
+    return int(x), int(y), diff_map
 
 
 def get_placement_section(img: np.ndarray, x: int, y: int, region_size: int) -> np.ndarray:
-    arr = _to_rgb_uint8(img)
-    h, w = arr.shape[:2]
-
-    half = region_size // 2
-    result = np.zeros((region_size, region_size, 3), dtype=np.uint8)
-
-    src_y_start = y - half
-    src_y_end = src_y_start + region_size
-    src_x_start = x - half
-    src_x_end = src_x_start + region_size
-
-    dst_y_start = 0
-    dst_x_start = 0
-
-    if src_y_start < 0:
-        dst_y_start = -src_y_start
-        src_y_start = 0
-    if src_x_start < 0:
-        dst_x_start = -src_x_start
-        src_x_start = 0
-    if src_y_end > h:
-        src_y_end = h
-    if src_x_end > w:
-        src_x_end = w
-
-    copy_h = src_y_end - src_y_start
-    copy_w = src_x_end - src_x_start
-
-    if copy_h > 0 and copy_w > 0:
-        result[dst_y_start:dst_y_start + copy_h, dst_x_start:dst_x_start + copy_w] = \
-            arr[src_y_start:src_y_end, src_x_start:src_x_end]
-
-    return result
+    section = img[y:y + region_size, x:x + region_size]
+    if section.ndim == 3 and section.shape[2] == 4:
+        section = section[:, :, :3]
+    return section
 
 
 def _to_rgb_float(img: np.ndarray) -> np.ndarray:

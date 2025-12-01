@@ -211,6 +211,15 @@ def _diff_to_marked_rgb(diff: np.ndarray, cx: int, cy: int, w: int, h: int) -> n
     return rgb
 
 
+def diff_to_rgb(diff: np.ndarray, max_diff: float = None) -> np.ndarray:
+    if max_diff is None:
+        max_diff = diff.max() if diff.max() > 0 else 1.0
+
+    normalized = np.clip(diff / max_diff, 0, 1)
+    gray = (normalized * 255).astype(np.uint8)
+    return np.stack([gray, gray, gray], axis=2)
+
+
 def main():
     test_directory()
     test_directory_2()
